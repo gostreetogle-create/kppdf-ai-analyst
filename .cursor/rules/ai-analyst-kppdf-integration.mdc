@@ -1,0 +1,17 @@
+---
+description: KPPDF client and shared contracts
+globs: "**/kppdf.client.ts,shared/types/**"
+alwaysApply: false
+---
+
+# KPPDF integration
+
+- Base URL: `KPPDF_API_URL` = `http://localhost:3000/api/v1`
+- Products: `GET /directories/products?page=&limit=`
+- Categories: `GET /directories/categories?page=&limit=`
+- Login: `POST /auth/login` body `{ username, password }` — tokens from Set-Cookie
+- Refresh: `POST /auth/refresh` with refresh cookie/token on 401
+- Pagination response: `{ success, data: T[], total, page, limit, totalPages }`
+- Permission codes (`office.products.view`) ≠ URL paths
+
+Shared types must match [action-plan INewsItem](../../docs/plans/ai-analyst-action-plan.md).

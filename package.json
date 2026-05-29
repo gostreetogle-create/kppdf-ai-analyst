@@ -1,0 +1,16 @@
+{
+  "name": "kppdf-ai-analyst",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI analytics platform for KPPDF 3.0",
+  "scripts": {
+    "dev": "npm --prefix backend run dev",
+    "dev:admin": "npm --prefix admin run dev",
+    "build": "npm --prefix backend run build",
+    "build:admin": "npm --prefix admin run build",
+    "start": "npm --prefix backend run start",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
+  }
+}

@@ -1,0 +1,18 @@
+---
+description: Backend Express modules (kppdf-ai-analyst)
+globs: backend/**,shared/**
+alwaysApply: false
+---
+
+# Backend
+
+- Express + Mongoose + `@qdrant/js-client-rest` + `rss-parser` + `node-cron`
+- Config: `backend/src/config/index.ts`, dotenv from repo root `.env`
+- Modules: `backend/src/modules/<domain>/`
+- Clients: `backend/src/clients/` — единственная точка к внешним API
+- Routes: `/v1/health` без auth; `apiKeyAuth` на остальные `/v1/*`
+- HTTP: native `fetch`, typed wrappers
+- Mongoose dates: `Date` in schema, ISO in JSON responses
+- Logs: `[sync]`, `[news]`, `[kppdf]`, `[qdrant]`
+
+Полные инварианты: [AGENTS.md](../../AGENTS.md)

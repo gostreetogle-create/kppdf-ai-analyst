@@ -1,0 +1,16 @@
+---
+description: kppdf-ai-analyst — контекст и запреты
+alwaysApply: true
+---
+
+# AI Analyst (kppdf-ai-analyst)
+
+Отдельный repo. **KPPDF 3.0** = catalog + auth + proxy + UI. **Этот repo** = RAG + LLM + `/v1` API.
+
+Перед правками читать [docs/PROJECT_RULES.md](../../docs/PROJECT_RULES.md), [AGENTS.md](../../AGENTS.md) и [docs/plans/ai-analyst-action-plan.md](../../docs/plans/ai-analyst-action-plan.md).
+
+- v1: news pipeline. v2: `POST /v1/ask`. **Не менять kppdf-3.0** из этого repo — дать пользователю промпт для kppdf-3.0 (Фаза 3 — исключение).
+- KPPDF paths: `/directories/products`, `/directories/categories` (не `/office/*`).
+- Auth: `username` + cookies + refresh. Lists: `body.data`.
+- Native **fetch** only. Не добавлять axios.
+- `AI_SERVICE_API_KEY` ≠ `OPENROUTER_API_KEY`.
