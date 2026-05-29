@@ -237,48 +237,48 @@ v1: копия файла в оба repo. v2: npm-пакет `@kppdf/ai-contract
 
 - [x] Создать папку `D:\invSportiN\Сайт\kppdf-ai-analyst`
 - [x] `git init`, `.gitignore`, README
-- [ ] Создать remote repo (GitHub/GitLab)
+- [x] Создать remote repo (GitHub/GitLab)
 - [ ] Согласовать `AI_SERVICE_API_KEY` (один секрет в обоих `.env`)
-- [ ] Добавить service account в KPPDF seed + получить token для sync
+- [ ] Добавить service account в KPPDF seed + получить token для sync *(в kppdf-3.0)*
 
 ### Фаза 1 — AI backend MVP (2–3 дня)
 
-- [ ] Scaffold backend: config, server, mongo, docker-compose (qdrant + mongo)
-- [ ] OpenRouter service (native fetch): chat + embed
-- [ ] Qdrant service: upsert, search, health
-- [ ] KPPDF client: paginate `body.data`, categories
-- [ ] Knowledge indexer + topic extractor
-- [ ] RSS fetcher
-- [ ] News analyst service (6 steps)
-- [ ] NewsItem + AgentRun models
-- [ ] API: `/v1/health`, `/v1/news`, `/topics`, `/refresh`, `/sync`, `/runs`
-- [ ] Scheduler + startup sync
-- [ ] Smoke: health → sync → refresh → GET news
+- [x] Scaffold backend: config, server, mongo, docker-compose (qdrant + mongo)
+- [x] OpenRouter service (native fetch): chat + embed
+- [x] Qdrant service: upsert, search, health
+- [x] KPPDF client: paginate `body.data`, categories
+- [x] Knowledge indexer + topic extractor
+- [x] RSS fetcher
+- [x] News analyst service (6 steps)
+- [x] NewsItem + AgentRun models
+- [x] API: `/v1/health`, `/v1/news`, `/topics`, `/refresh`, `/sync`, `/runs`
+- [x] Scheduler + startup sync
+- [ ] Smoke: health → sync → refresh → GET news *(нужен KPPDF + ai-sync)*
 
 ### Фаза 2 — AI Admin (1–2 дня)
 
-- [ ] Admin JWT auth
-- [ ] AiProvider model + encryption
-- [ ] Provider router (chat/embed by task)
-- [ ] Admin API: providers CRUD, test, dashboard, settings
-- [ ] React admin: Dashboard + Providers + Models + KPPDF + Runs
-- [ ] Serve admin build from backend `/admin` (prod)
+- [x] Admin JWT auth
+- [x] AiProvider model + encryption
+- [x] Provider router (chat/embed by task)
+- [x] Admin API: providers CRUD, test, dashboard, settings, jobs, news, knowledge stats
+- [x] React admin: Dashboard + Providers + Models + KPPDF + Jobs + News + Knowledge + Runs
+- [x] Serve admin build from backend `/admin` (prod)
 
 ### Фаза 3 — KPPDF integration (1 день)
 
-- [ ] `shared/types/newsItem.interface.ts`
-- [ ] `ai-proxy` module
-- [ ] Permissions + seed role
-- [ ] Angular `/news` feature
-- [ ] Route + menu
+- [x] `shared/types/newsItem.interface.ts` *(в этом repo)*
+- [ ] `ai-proxy` module *(kppdf-3.0)*
+- [ ] Permissions + seed role *(kppdf-3.0)*
+- [ ] Angular `/news` feature *(kppdf-3.0)*
+- [ ] Route + menu *(kppdf-3.0)*
 - [ ] E2E: UI → KPPDF proxy → AI → cards
 
 ### Фаза 4 — Hardening (0.5–1 день)
 
-- [ ] Обработка 503 когда AI offline
-- [ ] Тесты: topic-extractor, rss dedup, URL validation в curate
-- [ ] README в обоих repo: как запускать локально
-- [ ] Docker prod build AI service
+- [ ] Обработка 503 когда AI offline *(kppdf-proxy, Фаза 3)*
+- [x] Тесты: topic-extractor, rss dedup, URL validation в curate
+- [x] README: как запускать локально и prod
+- [x] Docker prod build AI service (Dockerfile)
 
 ### Фаза 5 — v2 (позже)
 

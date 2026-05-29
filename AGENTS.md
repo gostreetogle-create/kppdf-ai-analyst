@@ -121,6 +121,7 @@ curl -H "X-API-Key: ..." http://localhost:3100/v1/news
 | `backend/src/modules/knowledge/` | Indexer |
 | `backend/src/modules/news/` | Topic, RSS, analyst |
 | `docs/PROJECT_RULES.md` | Правила ведения проекта (repo, порты, sync) |
+| `docs/KPPDF3_REQUIREMENTS.md` | Требования к kppdf-3.0, чеклисты и промпты |
 | `docs/ONBOARDING.md` | Local setup |
 | `docs/ARCHITECTURE.md` | System design |
 

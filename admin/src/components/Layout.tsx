@@ -3,6 +3,12 @@ import { useAuth } from '../auth/AuthContext';
 
 const nav = [
   { to: '/', label: 'Обзор' },
+  { to: '/kppdf', label: 'KPPDF' },
+  { to: '/google-sheets', label: 'Google Таблица' },
+  { to: '/jobs', label: 'Задачи' },
+  { to: '/news-settings', label: 'Новости: поиск' },
+  { to: '/news', label: 'Новости' },
+  { to: '/knowledge', label: 'Знания' },
   { to: '/providers', label: 'Провайдеры AI' },
   { to: '/models', label: 'Модели' },
   { to: '/runs', label: 'Запуски' },

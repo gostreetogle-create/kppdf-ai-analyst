@@ -4,12 +4,18 @@ import { syncCatalog } from '../modules/knowledge/indexer.service';
 import { refreshNews } from '../modules/news/news-analyst.service';
 import { AgentRunModel } from '../models/agentRun.model';
 
+export interface JobRunResult {
+  status: 'success' | 'failed' | 'skipped';
+  error?: string;
+  stats?: Record<string, unknown>;
+}
+
 let syncInProgress = false;
 
-async function runSyncJob(trigger: 'startup' | 'cron' | 'manual'): Promise<void> {
+export async function runSyncJob(trigger: 'startup' | 'cron' | 'manual'): Promise<JobRunResult> {
   if (syncInProgress) {
     console.warn('[scheduler] sync skipped — already running');
-    return;
+    return { status: 'skipped', error: 'Синхронизация уже выполняется' };
   }
 
   syncInProgress = true;
@@ -28,23 +34,39 @@ async function runSyncJob(trigger: 'startup' | 'cron' | 'manual'): Promise<void>
     run.stats = { ...stats, trigger };
     await run.save();
     console.log('[scheduler] sync finished', stats);
+    return { status: 'success', stats: run.stats as Record<string, unknown> };
   } catch (err) {
     run.status = 'failed';
     run.finishedAt = new Date();
     run.error = err instanceof Error ? err.message : String(err);
     await run.save();
     console.error('[scheduler] sync failed', run.error);
+    return { status: 'failed', error: run.error, stats: { trigger } };
   } finally {
     syncInProgress = false;
   }
 }
 
-async function runNewsRefreshJob(trigger: 'cron' | 'manual'): Promise<void> {
+export async function runNewsRefreshJob(trigger: 'cron' | 'manual'): Promise<JobRunResult> {
   try {
     console.log(`[scheduler] news refresh started (${trigger})`);
-    await refreshNews();
+    const result = await refreshNews();
+    return {
+      status: 'success',
+      stats: { trigger, ...result } as unknown as Record<string, unknown>,
+    };
   } catch (err) {
-    console.error('[scheduler] news refresh failed', err instanceof Error ? err.message : err);
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('already in progress')) {
+      console.warn('[scheduler] news refresh skipped — already running');
+      return {
+        status: 'skipped',
+        error: 'Обновление новостей уже выполняется — дождитесь завершения',
+        stats: { trigger },
+      };
+    }
+    console.error('[scheduler] news refresh failed', message);
+    return { status: 'failed', error: message, stats: { trigger } };
   }
 }
 

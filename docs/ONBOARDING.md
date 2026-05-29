@@ -49,43 +49,53 @@ JWT **не кладётся в .env** — `kppdf.client` логинится пр
 
 ```powershell
 cd kppdf-ai-analyst
-.\start.ps1          # или .\start.cmd
+.\start.cmd          # Docker + backend :3100 + admin :5174 (по умолчанию)
+.\start.ps1 -NoAdmin # только backend, без admin :5174
 .\stop.ps1           # остановка; .\stop.ps1 -KeepDocker — оставить Mongo/Qdrant
 ```
 
-**Вручную / Linux:**
+**Production:**
+
+```bash
+npm run build:all
+NODE_ENV=production npm start
+# http://localhost:3100/admin/
+```
+
+**Вручную / Linux (dev):**
 
 ```bash
 cd kppdf-ai-analyst
 docker compose up -d          # Mongo :27018, Qdrant :6333
 cd backend && npm install
 cd .. && npm run dev          # :3100
+cd admin && npm run dev       # :5174 (отдельный терминал)
 ```
 
-## 4. Админка (Фаза 2)
+## 4. Админка
 
-```bash
-# После запуска backend :3100
-cd admin && npm install
-cd .. && npm run dev:admin    # http://localhost:5174
-```
+`start.cmd` / `start.ps1` запускают админку **по умолчанию** на http://localhost:5174.
 
-Windows: `.\start.ps1 -WithAdmin`
-
-| Параметр | Значение по умолчанию |
-|----------|------------------------|
+| Параметр | Значение |
+|----------|----------|
 | URL (dev) | http://localhost:5174 |
 | URL (prod) | http://localhost:3100/admin/ |
 | Логин | `ADMIN_USERNAME` → `admin` |
 | Пароль | `ADMIN_PASSWORD` из `.env` |
 
-В админке можно:
+Страницы:
 
-1. **Провайдеры AI** — вставить OpenRouter API key (хранится зашифрованно), сделать default, нажать «Тест».
-2. **Модели** — `embedModel`, `chatModel`, `curateModel` (id моделей OpenRouter).
-3. **Обзор / Запуски** — health, счётчики, история AgentRun.
+1. **Обзор** — health, быстрые кнопки Sync / News refresh
+2. **KPPDF** — read-only подключение к kppdf-3.0
+3. **Задачи** — ручной запуск sync и news refresh
+4. **Новости: поиск** — лимиты тем, паузы RSS/curate, свои RSS-ленты, пресет «Быстрый тест» (без sync каталога)
+5. **Новости** — превью ленты из Mongo
+6. **Знания** — статистика Qdrant (products)
+7. **Провайдеры / Модели / Запуски** — настройка AI и история AgentRun
 
 KPPDF URL/username — только просмотр (настройка в `.env`).
+
+> **503 «AI offline»** в UI KPPDF — ответственность **kppdf-proxy** (Фаза 3), не этого сервиса.
 
 ## 5. Smoke-тесты (v1)
 

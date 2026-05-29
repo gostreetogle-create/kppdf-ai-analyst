@@ -38,7 +38,19 @@ export async function upsertKnowledge(
     payload: item.payload as unknown as Record<string, unknown>,
   }));
 
-  await qdrant.upsert(config.qdrant.collection, { wait: true, points });
+  try {
+    await qdrant.upsert(config.qdrant.collection, { wait: true, points });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const dim = items[0]?.vector.length;
+    if (msg === 'Bad Request' || msg.includes('dimension')) {
+      throw new Error(
+        `[qdrant] upsert failed: vector dim=${dim}, QDRANT_VECTOR_SIZE=${config.qdrant.vectorSize}. ` +
+          'Проверьте QDRANT_VECTOR_SIZE в .env (2048 для nvidia/llama-nemotron-embed-vl-1b-v2:free).',
+      );
+    }
+    throw err;
+  }
   return points.length;
 }
 
@@ -67,4 +79,13 @@ export async function searchKnowledge(
   }).filter((hit) => hit.productId);
 }
 
-export const knowledgeQdrantService = { upsertKnowledge, searchKnowledge };
+export async function countProducts(): Promise<number> {
+  const qdrant = getQdrantClient();
+  const result = await qdrant.count(config.qdrant.collection, {
+    exact: true,
+    filter: PRODUCT_FILTER,
+  });
+  return result.count ?? 0;
+}
+
+export const knowledgeQdrantService = { upsertKnowledge, searchKnowledge, countProducts };

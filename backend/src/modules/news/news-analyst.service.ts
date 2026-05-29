@@ -1,12 +1,12 @@
 import { AgentRunModel } from '../../models/agentRun.model';
 import { NewsItemModel } from '../../models/newsItem.model';
-import { config } from '../../config';
 import { syncCatalog } from '../knowledge/indexer.service';
 import { embed, curateNews } from '../openrouter/openrouter.service';
 import type { CurateNewsInputItem } from '../openrouter/openrouter.types';
 import { searchKnowledge } from '../qdrant/knowledge.service';
-import { dedupByUrl, fetchRssForTopic } from './rss-fetcher';
+import { dedupByUrl, fetchCustomRssFeeds, fetchRssForTopic } from './rss-fetcher';
 import { extractTopics, type NewsTopic } from './topic-extractor';
+import { resolveNewsSettings } from './news-settings-resolver.service';
 import { sleep } from '../../utils/http';
 
 export interface NewsRefreshResult {
@@ -29,6 +29,30 @@ interface TopicRssItem {
 }
 
 let refreshInProgress = false;
+let refreshStartedAt = 0;
+
+const REFRESH_STALE_MS = 15 * 60 * 1000;
+
+export function isNewsRefreshInProgress(): boolean {
+  return refreshInProgress;
+}
+
+function acquireRefreshLock(): void {
+  if (refreshInProgress) {
+    const age = Date.now() - refreshStartedAt;
+    if (age < REFRESH_STALE_MS) {
+      throw new Error('[news] refresh already in progress');
+    }
+    console.warn(`[news] stale in-memory lock (${Math.round(age / 1000)}s), starting new refresh`);
+  }
+  refreshInProgress = true;
+  refreshStartedAt = Date.now();
+}
+
+function releaseRefreshLock(): void {
+  refreshInProgress = false;
+  refreshStartedAt = 0;
+}
 
 async function ragProductsForTopic(topic: NewsTopic) {
   const query = `${topic.label}. ${topic.fullPath}. промышленность B2B`;
@@ -38,11 +62,8 @@ async function ragProductsForTopic(topic: NewsTopic) {
 }
 
 export async function refreshNews(): Promise<NewsRefreshResult> {
-  if (refreshInProgress) {
-    throw new Error('[news] refresh already in progress');
-  }
+  acquireRefreshLock();
 
-  refreshInProgress = true;
   const run = await AgentRunModel.create({
     type: 'news_refresh',
     status: 'running',
@@ -52,16 +73,39 @@ export async function refreshNews(): Promise<NewsRefreshResult> {
   try {
     console.log('[news] refresh started', run._id);
 
-    await syncCatalog();
-    const topics = await extractTopics();
+    const settings = await resolveNewsSettings();
+
+    if (!settings.skipSyncInNewsRefresh) {
+      await syncCatalog();
+    } else {
+      console.log('[news] skip catalog sync (admin setting)');
+    }
+
+    const topics = await extractTopics(settings.topicsLimit);
     const topicRssItems: TopicRssItem[] = [];
     const ragByTopic = new Map<string, Awaited<ReturnType<typeof ragProductsForTopic>>>();
+
+    if (settings.customRssUrls.length > 0) {
+      const customItems = await fetchCustomRssFeeds(
+        settings.customRssUrls,
+        settings.maxRssItemsPerTopic,
+        settings.rssPauseMs,
+      );
+      for (const item of customItems) {
+        topicRssItems.push({
+          ...item,
+          topicSlug: 'custom',
+          topicLabel: 'Пользовательские ленты',
+        });
+      }
+    }
 
     for (let i = 0; i < topics.length; i++) {
       const topic = topics[i]!;
       const products = await ragProductsForTopic(topic);
       ragByTopic.set(topic.slug, products);
-      const rssItems = await fetchRssForTopic(topic.label);
+
+      const rssItems = await fetchRssForTopic(topic.label, settings);
 
       for (const item of rssItems) {
         topicRssItems.push({
@@ -71,8 +115,8 @@ export async function refreshNews(): Promise<NewsRefreshResult> {
         });
       }
 
-      if (i < topics.length - 1 && config.news.rssPauseMs > 0) {
-        await sleep(config.news.rssPauseMs);
+      if (i < topics.length - 1 && settings.rssPauseMs > 0) {
+        await sleep(settings.rssPauseMs);
       }
     }
 
@@ -96,7 +140,7 @@ export async function refreshNews(): Promise<NewsRefreshResult> {
       });
     }
 
-    const curated = await curateNews(curateInputs);
+    const curated = await curateNews(curateInputs, settings);
     const fetchedAt = new Date();
     let newsSaved = 0;
 
@@ -150,8 +194,8 @@ export async function refreshNews(): Promise<NewsRefreshResult> {
     console.error('[news] refresh failed', run.error);
     throw err;
   } finally {
-    refreshInProgress = false;
+    releaseRefreshLock();
   }
 }
 
-export const newsAnalystService = { refreshNews };
+export const newsAnalystService = { refreshNews, isNewsRefreshInProgress };

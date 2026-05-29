@@ -11,7 +11,7 @@
 
 **Правило:** этот repo — отдельный проект с отдельным деплоем. AI-агенты и разработчики **не меняют** код, API, seed и конфиг **kppdf-3.0** из этого workspace.
 
-Если нужны правки в kppdf-3.0 (seed `ai-sync`, proxy, Angular `/news`) — **дайте пользователю готовый промпт/инструкцию** для работы в репозитории kppdf-3.0, а не правьте его отсюда.
+Если нужны правки в kppdf-3.0 (seed `ai-sync`, proxy, Angular `/news`) — используйте **[docs/KPPDF3_REQUIREMENTS.md](KPPDF3_REQUIREMENTS.md)** (чеклисты + готовые промпты) или передайте его команде kppdf-3.0.
 
 Исключение: **Фаза 3** action-plan — интеграция proxy/UI в kppdf-3.0 по явному запросу.
 
@@ -86,6 +86,8 @@ KPPDF_AUTH_PASSWORD=ai-sync123   # или ваш пароль из seed
 | [ONBOARDING.md](ONBOARDING.md) | Первый запуск, smoke-тесты |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Схема системы |
 | [plans/ai-analyst-action-plan.md](plans/ai-analyst-action-plan.md) | Roadmap и фазы |
+| [KPPDF3_REQUIREMENTS.md](KPPDF3_REQUIREMENTS.md) | **Требования к kppdf-3.0** — чеклисты и промпты для передачи |
+| [GOOGLE_SHEETS.md](GOOGLE_SHEETS.md) | Google Таблица products (тестовое подключение) |
 
 ## 9. Код — ключевые запреты
 
@@ -96,3 +98,34 @@ KPPDF_AUTH_PASSWORD=ai-sync123   # или ваш пароль из seed
 - Не просить LLM выполнять fetch RSS — RSS только в коде.
 
 Полный список: [AGENTS.md](../AGENTS.md).
+
+## 10. Промпты для kppdf-3.0
+
+Полный набор чеклистов и промптов (sync, Фаза 3, диагностика): **[KPPDF3_REQUIREMENTS.md](KPPDF3_REQUIREMENTS.md)**
+
+Краткий промпт Фазы 3 (дубликат — полная версия в KPPDF3_REQUIREMENTS):
+
+```
+Реализуй интеграцию с kppdf-ai-analyst (Фаза 3):
+
+1. backend/src/modules/ai-proxy/
+   - ai-proxy.config.ts: AI_SERVICE_URL=http://127.0.0.1:3100, AI_SERVICE_API_KEY из .env
+   - ai-proxy.client.ts: native fetch, header X-API-Key
+   - news.router.ts: GET / → proxy GET /v1/news, GET /topics → /v1/news/topics,
+     POST /refresh → POST /v1/news/refresh
+
+2. backend/src/app.ts: app.use('/api/v1/news', authenticate, newsRouter)
+   - GET: requirePermission('office.news.view')
+   - POST refresh: requirePermission('office.news.refresh')
+   - AI недоступен → 503 «AI-аналитик недоступен»
+
+3. shared/types/newsItem.interface.ts — синхрон с kppdf-ai-analyst
+
+4. Angular src/app/features/news/ — страница /news, ApiService, карточки новостей
+
+5. permissions, menu «Новости отрасли», route /news
+
+6. .env.example: AI_SERVICE_URL, AI_SERVICE_API_KEY (тот же секрет, что в ai-analyst .env)
+
+Не менять paths каталога (/directories/products). Auth: username + cookies.
+```

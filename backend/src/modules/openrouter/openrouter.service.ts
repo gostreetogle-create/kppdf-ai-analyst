@@ -1,5 +1,35 @@
 import type { ChatMessage, CurateNewsInputItem, CuratedNewsItem } from './openrouter.types';
 import { resolveDefaultProvider, resolveModels } from '../providers/provider-resolver.service';
+import { filterCuratedNewsItems } from '../news/curate-filter.util';
+import { sleep } from '../../utils/http';
+import type { NewsSettings } from '../news/news-settings.types';
+import { resolveNewsSettings } from '../news/news-settings-resolver.service';
+
+const MAX_RETRIES = 5;
+
+function parseRetryAfterMs(res: Response, bodyText: string, attempt: number): number {
+  const header = res.headers.get('Retry-After');
+  if (header) {
+    const sec = parseFloat(header);
+    if (!Number.isNaN(sec) && sec > 0) {
+      return Math.min(Math.max(Math.ceil(sec * 1000), 1000), 60_000);
+    }
+  }
+
+  try {
+    const json = JSON.parse(bodyText) as {
+      error?: { metadata?: { retry_after_seconds?: number } };
+    };
+    const sec = json.error?.metadata?.retry_after_seconds;
+    if (typeof sec === 'number' && sec > 0) {
+      return Math.min(Math.max(Math.ceil(sec * 1000), 1000), 60_000);
+    }
+  } catch {
+    // ignore invalid JSON
+  }
+
+  return Math.min(5000 * (attempt + 1), 30_000);
+}
 
 async function providerFetch<T>(
   path: string,
@@ -8,23 +38,39 @@ async function providerFetch<T>(
   baseUrl: string,
 ): Promise<T> {
   const base = baseUrl.replace(/\/+$/, '');
-  const res = await fetch(`${base}${path}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://kppdf.ru',
-      'X-Title': 'kppdf-ai-analyst',
-    },
-    body: JSON.stringify(body),
-  });
 
-  if (!res.ok) {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://kppdf.ru',
+        'X-Title': 'kppdf-ai-analyst',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (res.ok) {
+      return (await res.json()) as T;
+    }
+
     const text = await res.text();
+    const retryable = res.status === 429 || res.status === 503;
+
+    if (retryable && attempt < MAX_RETRIES) {
+      const waitMs = parseRetryAfterMs(res, text, attempt);
+      console.warn(
+        `[openrouter] ${path} ${res.status}, retry ${attempt + 1}/${MAX_RETRIES} in ${waitMs}ms`,
+      );
+      await sleep(waitMs);
+      continue;
+    }
+
     throw new Error(`[openrouter] ${path} failed ${res.status}: ${text}`);
   }
 
-  return (await res.json()) as T;
+  throw new Error(`[openrouter] ${path} failed after ${MAX_RETRIES} retries`);
 }
 
 export async function embed(texts: string[]): Promise<number[][]> {
@@ -73,7 +119,31 @@ const CURATE_SYSTEM = `Ты редактор новостной ленты дл�
 - Если новость нерелевантна теме каталога — пропусти её.
 - Ответ — строго JSON-массив без markdown.`;
 
-export async function curateNews(items: CurateNewsInputItem[]): Promise<CuratedNewsItem[]> {
+export async function curateNews(
+  items: CurateNewsInputItem[],
+  newsSettings?: Pick<NewsSettings, 'curateBatchSize' | 'curatePauseMs'>,
+): Promise<CuratedNewsItem[]> {
+  if (items.length === 0) return [];
+
+  const resolved = newsSettings ?? (await resolveNewsSettings());
+  const batchSize = Math.max(1, resolved.curateBatchSize);
+  const pauseMs = resolved.curatePauseMs;
+  const results: CuratedNewsItem[] = [];
+
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const part = await curateNewsBatch(batch);
+    results.push(...part);
+
+    if (i + batchSize < items.length && pauseMs > 0) {
+      await sleep(pauseMs);
+    }
+  }
+
+  return results;
+}
+
+async function curateNewsBatch(items: CurateNewsInputItem[]): Promise<CuratedNewsItem[]> {
   if (items.length === 0) return [];
 
   const models = await resolveModels();
@@ -114,23 +184,26 @@ export async function curateNews(items: CurateNewsInputItem[]): Promise<CuratedN
   try {
     parsed = JSON.parse(jsonText) as CuratedNewsItem[];
   } catch {
-    console.warn('[openrouter] curateNews invalid JSON, skipping');
+    console.warn('[openrouter] curateNews invalid JSON, skipping batch');
     return [];
   }
 
   if (!Array.isArray(parsed)) return [];
 
-  return parsed.filter((item) => {
-    if (!item.url || !allowedUrls.has(item.url)) return false;
-    const productSet = allowedProductIds.get(item.url);
-    if (!productSet) return false;
-    item.relatedProductIds = (item.relatedProductIds || []).filter((id) => productSet.has(id));
-    return Boolean(item.title && item.summary && item.topicSlug && item.topicLabel);
-  });
+  return filterCuratedNewsItems(parsed, allowedUrls, allowedProductIds);
 }
 
 /** Test connection for a specific provider (embed ping). */
 export async function testProviderConnection(
+  apiKey: string,
+  baseUrl: string,
+  embedModel: string,
+): Promise<{ ok: boolean; message: string }> {
+  const result = await testEmbedModel(apiKey, baseUrl, embedModel);
+  return { ok: result.ok, message: result.message };
+}
+
+async function testEmbedModel(
   apiKey: string,
   baseUrl: string,
   embedModel: string,
@@ -142,11 +215,58 @@ export async function testProviderConnection(
       apiKey,
       baseUrl,
     );
-    return { ok: true, message: 'Подключение успешно (embeddings)' };
+    return { ok: true, message: 'Эмбеддинги: OK' };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, message: msg };
+    return { ok: false, message: `Эмбеддинги: ${msg}` };
   }
 }
 
-export const openRouterService = { embed, chat, curateNews, testProviderConnection };
+async function testChatModel(
+  apiKey: string,
+  baseUrl: string,
+  chatModel: string,
+): Promise<{ ok: boolean; message: string }> {
+  try {
+    await providerFetch<{ choices: unknown[] }>(
+      '/chat/completions',
+      {
+        model: chatModel,
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+        temperature: 0,
+      },
+      apiKey,
+      baseUrl,
+    );
+    return { ok: true, message: 'Чат: OK' };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, message: `Чат: ${msg}` };
+  }
+}
+
+/** Live ping for embed + chat models. */
+export async function testModels(
+  apiKey: string,
+  baseUrl: string,
+  embedModel: string,
+  chatModel: string,
+): Promise<{
+  ok: boolean;
+  embed: { ok: boolean; message: string };
+  chat: { ok: boolean; message: string };
+}> {
+  const [embed, chat] = await Promise.all([
+    testEmbedModel(apiKey, baseUrl, embedModel),
+    testChatModel(apiKey, baseUrl, chatModel),
+  ]);
+
+  return {
+    ok: embed.ok && chat.ok,
+    embed,
+    chat,
+  };
+}
+
+export const openRouterService = { embed, chat, curateNews, testProviderConnection, testModels };

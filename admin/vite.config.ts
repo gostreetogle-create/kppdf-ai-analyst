@@ -6,6 +6,8 @@ export default defineConfig(({ mode }) => ({
   base: mode === 'production' ? '/admin/' : '/',
   server: {
     port: 5174,
+    host: '127.0.0.1',
+    strictPort: true,
     proxy: {
       '/admin': {
         target: 'http://localhost:3100',

@@ -13,6 +13,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
+    public details?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -29,10 +30,10 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
   const res = await fetch(path, { ...init, headers });
-  const data = (await res.json().catch(() => ({}))) as { error?: string };
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & { error?: string };
 
   if (!res.ok) {
-    throw new ApiError(data.error || res.statusText || 'Ошибка запроса', res.status);
+    throw new ApiError(data.error || res.statusText || 'Ошибка запроса', res.status, data);
   }
 
   return data as T;

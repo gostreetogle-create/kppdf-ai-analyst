@@ -41,6 +41,10 @@ export const config = {
   news: {
     topicsLimit: parseInt(process.env.NEWS_TOPICS_LIMIT || '15', 10),
     rssPauseMs: parseInt(process.env.NEWS_RSS_PAUSE_MS || '400', 10),
+    curateBatchSize: parseInt(process.env.NEWS_CURATE_BATCH_SIZE || '8', 10),
+    curatePauseMs: parseInt(process.env.NEWS_CURATE_PAUSE_MS || '2000', 10),
+    skipSyncInNewsRefresh: process.env.NEWS_SKIP_SYNC_IN_REFRESH === 'true',
+    maxRssItemsPerTopic: parseInt(process.env.NEWS_MAX_RSS_ITEMS_PER_TOPIC || '20', 10),
   },
 
   admin: {
@@ -48,5 +52,19 @@ export const config = {
     password: process.env.ADMIN_PASSWORD || 'admin',
     jwtSecret: process.env.ADMIN_JWT_SECRET || 'change-me-admin-jwt-secret',
     encryptionSecret: process.env.ADMIN_ENCRYPTION_SECRET || '',
+  },
+
+  /** google_sheets | kppdf — auto: sheets if GOOGLE credentials set */
+  catalogSyncSource: process.env.CATALOG_SYNC_SOURCE || '',
+
+  /** Google Sheets — та же таблица каталога, что kppdf-3.0/tools/products_import_export */
+  googleSheets: {
+    sheetId: process.env.GOOGLE_SHEET_ID || process.env.GOOGLE_SHEETS_ID || '',
+    productsRange: process.env.GOOGLE_SHEETS_PRODUCTS_RANGE || 'products!A1:ZZ5000',
+    catalogRange: process.env.GOOGLE_SHEETS_CATALOG_RANGE || 'ai_analyst_catalog!A1:Z500',
+    catalogSheetName: 'ai_analyst_catalog',
+    serviceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '',
+    privateKey: process.env.GOOGLE_PRIVATE_KEY || '',
+    serviceAccountKeyPath: process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '',
   },
 };

@@ -14,8 +14,23 @@ import {
   resetModelsToEnvDefaults,
   getEnvModelDefaults,
   resolveModels,
+  resolveDefaultProvider,
 } from '../../modules/providers/provider-resolver.service';
-import { testProviderConnection } from '../../modules/openrouter/openrouter.service';
+import { testProviderConnection, testModels } from '../../modules/openrouter/openrouter.service';
+import { openRouterModelsService } from '../../modules/openrouter/openrouter-models.service';
+import {
+  buildModelCatalogIds,
+  validateModelsAgainstCatalog,
+} from '../../modules/openrouter/model-validation.util';
+import { scheduler } from '../../jobs/scheduler';
+import { countProducts } from '../../modules/qdrant/knowledge.service';
+import { googleSheetsIntegration } from '../../modules/integrations/google-sheets.service';
+import {
+  getEnvNewsDefaults,
+  normalizeNewsSettingsInput,
+  resolveNewsSettings,
+  saveNewsSettings,
+} from '../../modules/news/news-settings-resolver.service';
 
 const DEFAULT_BASE_URLS: Record<AiProviderType, string> = {
   openrouter: 'https://openrouter.ai/api/v1',
@@ -233,6 +248,106 @@ router.post('/providers/:id/test', async (req, res: Response) => {
   }
 });
 
+router.get('/openrouter/models', async (req, res: Response) => {
+  try {
+    const kind = String(req.query.kind ?? 'all').toLowerCase();
+    const refresh = req.query.refresh === '1' || req.query.refresh === 'true';
+    const catalog = await openRouterModelsService.getModelCatalog(refresh);
+
+    if (kind === 'chat') {
+      res.json({ models: catalog.chat, kind: 'chat', cachedAt: catalog.cachedAt });
+      return;
+    }
+    if (kind === 'embed') {
+      res.json({ models: catalog.embed, kind: 'embed', cachedAt: catalog.cachedAt });
+      return;
+    }
+
+    res.json({
+      chat: catalog.chat,
+      embed: catalog.embed,
+      cachedAt: catalog.cachedAt,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Ошибка загрузки каталога OpenRouter';
+    res.status(502).json({ error: message });
+  }
+});
+
+router.post('/models/validate', async (req, res: Response) => {
+  try {
+    const { embedModel, chatModel, curateModel } = req.body as {
+      embedModel?: string;
+      chatModel?: string;
+      curateModel?: string;
+    };
+
+    if (!embedModel?.trim() || !chatModel?.trim()) {
+      res.status(400).json({ error: 'Поля эмбеддингов и чата обязательны' });
+      return;
+    }
+
+    const catalog = await openRouterModelsService.getModelCatalog();
+    const ids = buildModelCatalogIds(catalog);
+    const result = validateModelsAgainstCatalog(
+      {
+        embedModel: embedModel.trim(),
+        chatModel: chatModel.trim(),
+        curateModel: curateModel?.trim(),
+      },
+      ids,
+    );
+
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Ошибка проверки моделей';
+    res.status(502).json({ error: message });
+  }
+});
+
+router.post('/models/test', async (req, res: Response) => {
+  try {
+    const { embedModel, chatModel } = req.body as {
+      embedModel?: string;
+      chatModel?: string;
+    };
+
+    if (!embedModel?.trim() || !chatModel?.trim()) {
+      res.status(400).json({ error: 'Поля эмбеддингов и чата обязательны' });
+      return;
+    }
+
+    const catalog = await openRouterModelsService.getModelCatalog();
+    const ids = buildModelCatalogIds(catalog);
+    const validation = validateModelsAgainstCatalog(
+      { embedModel: embedModel.trim(), chatModel: chatModel.trim() },
+      ids,
+    );
+
+    if (!validation.valid) {
+      res.status(400).json({
+        ok: false,
+        error: validation.errors.map((e) => e.message).join(' '),
+        validation,
+      });
+      return;
+    }
+
+    const provider = await resolveDefaultProvider();
+    const result = await testModels(
+      provider.apiKey,
+      provider.baseUrl,
+      embedModel.trim(),
+      chatModel.trim(),
+    );
+
+    res.status(result.ok ? 200 : 502).json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Ошибка теста моделей';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
 router.get('/settings/models', async (_req, res: Response) => {
   const settings = await getOrCreateDefaultSettings();
   const resolved = await resolveModels();
@@ -265,14 +380,34 @@ router.put('/settings/models', async (req, res: Response) => {
     return;
   }
 
+  const trimmed = {
+    embedModel: embedModel.trim(),
+    chatModel: chatModel.trim(),
+    curateModel: curateModel?.trim() || chatModel.trim(),
+  };
+
+  try {
+    const catalog = await openRouterModelsService.getModelCatalog();
+    const ids = buildModelCatalogIds(catalog);
+    const validation = validateModelsAgainstCatalog(trimmed, ids);
+
+    if (!validation.valid) {
+      res.status(400).json({
+        error: validation.errors.map((e) => e.message).join(' '),
+        errors: validation.errors,
+      });
+      return;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Не удалось проверить модели в OpenRouter';
+    res.status(502).json({ error: message });
+    return;
+  }
+
   const doc = await AppSettingsModel.findOneAndUpdate(
     { key: APP_SETTINGS_KEY },
     {
-      $set: {
-        embedModel: embedModel.trim(),
-        chatModel: chatModel.trim(),
-        curateModel: curateModel?.trim() || chatModel.trim(),
-      },
+      $set: trimmed,
       $setOnInsert: { key: APP_SETTINGS_KEY },
     },
     { upsert: true, new: true, setDefaultsOnInsert: true },
@@ -287,13 +422,64 @@ router.put('/settings/models', async (req, res: Response) => {
   });
 });
 
-router.get('/settings/kppdf', (_req, res: Response) => {
+router.get('/settings/news', async (_req, res: Response) => {
+  const resolved = await resolveNewsSettings();
+  const envDefaults = getEnvNewsDefaults();
+  res.json({
+    settings: {
+      topicsLimit: resolved.topicsLimit,
+      rssPauseMs: resolved.rssPauseMs,
+      curateBatchSize: resolved.curateBatchSize,
+      curatePauseMs: resolved.curatePauseMs,
+      skipSyncInNewsRefresh: resolved.skipSyncInNewsRefresh,
+      customRssUrls: resolved.customRssUrls,
+      useGoogleNewsRss: resolved.useGoogleNewsRss,
+      rssSearchTemplate: resolved.rssSearchTemplate,
+      maxRssItemsPerTopic: resolved.maxRssItemsPerTopic,
+    },
+    source: resolved.source,
+    envDefaults,
+  });
+});
+
+router.put('/settings/news', async (req, res: Response) => {
+  try {
+    const input = normalizeNewsSettingsInput(req.body as Record<string, unknown>);
+    const settings = await saveNewsSettings(input);
+    res.json({
+      settings,
+      source: 'db',
+      message: 'Настройки новостей сохранены',
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Ошибка сохранения';
+    res.status(400).json({ error: message });
+  }
+});
+
+router.get('/settings/kppdf', async (_req, res: Response) => {
+  let connectionOk = false;
+  let connectionError: string | undefined;
+
+  try {
+    const healthUrl = `${config.kppdf.baseUrl.replace(/\/+$/, '')}/health`;
+    const r = await fetch(healthUrl, { signal: AbortSignal.timeout(3000) });
+    connectionOk = r.ok;
+    if (!r.ok) {
+      connectionError = `HTTP ${r.status}`;
+    }
+  } catch (err) {
+    connectionError = err instanceof Error ? err.message : String(err);
+  }
+
   res.json({
     baseUrl: config.kppdf.baseUrl,
     username: config.kppdf.username,
     passwordConfigured: Boolean(config.kppdf.password),
+    connectionOk,
+    connectionError,
     readOnly: true,
-    note: 'Только просмотр. Измените KPPDF_API_URL, KPPDF_AUTH_USERNAME, KPPDF_AUTH_PASSWORD в файле .env в корне проекта и перезапустите backend (.\stop.ps1 → .\start.cmd). Через админку не редактируется.',
+    note: 'Только просмотр. Измените KPPDF_API_URL, KPPDF_AUTH_USERNAME, KPPDF_AUTH_PASSWORD в файле .env в корне проекта и перезапустите backend (.\\stop.ps1 → .\\start.cmd). Через админку не редактируется.',
   });
 });
 
@@ -340,6 +526,183 @@ router.get('/runs', async (req, res: Response) => {
     const message = err instanceof Error ? err.message : 'Ошибка загрузки запусков';
     console.error('[admin] GET /runs failed:', err);
     res.status(500).json({ error: message });
+  }
+});
+
+router.post('/jobs/sync', async (_req, res: Response) => {
+  try {
+    const result = await scheduler.runSyncJob('manual');
+    if (result.status === 'skipped') {
+      res.status(200).json(result);
+      return;
+    }
+    const code = result.status === 'success' ? 200 : 500;
+    res.status(code).json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Ошибка синхронизации';
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post('/jobs/news-refresh', async (_req, res: Response) => {
+  try {
+    const result = await scheduler.runNewsRefreshJob('manual');
+    if (result.status === 'skipped') {
+      res.status(200).json(result);
+      return;
+    }
+    const code = result.status === 'success' ? 200 : 500;
+    res.status(code).json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Ошибка обновления новостей';
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post('/jobs/recover-stale-runs', async (_req, res: Response) => {
+  try {
+    const { recoverStaleAgentRuns } = await import('../../jobs/agent-run-recovery');
+    const recovered = await recoverStaleAgentRuns(0);
+    res.json({ ok: true, recovered });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Ошибка восстановления runs';
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get('/news', async (req, res: Response) => {
+  try {
+    const page = Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '20'), 10) || 20, 1), 100);
+    const topic = String(req.query.topic ?? req.query.topicSlug ?? '').trim();
+    const q = String(req.query.q ?? '').trim();
+
+    const filter: Record<string, unknown> = { isActive: true };
+    if (topic) filter.topicSlug = topic;
+
+    if (q) {
+      filter.$or = [
+        { title: { $regex: q, $options: 'i' } },
+        { summary: { $regex: q, $options: 'i' } },
+        { sourceName: { $regex: q, $options: 'i' } },
+      ];
+    }
+
+    const skip = (page - 1) * limit;
+    const [items, total] = await Promise.all([
+      NewsItemModel.find(filter).sort({ publishedAt: -1 }).skip(skip).limit(limit).lean(),
+      NewsItemModel.countDocuments(filter),
+    ]);
+
+    res.json({
+      data: items.map((item) => ({
+        id: String(item._id),
+        title: item.title,
+        summary: item.summary,
+        url: item.url,
+        sourceName: item.sourceName,
+        publishedAt: item.publishedAt?.toISOString?.() ?? String(item.publishedAt),
+        fetchedAt: item.fetchedAt?.toISOString?.() ?? String(item.fetchedAt),
+        topicSlug: item.topicSlug,
+        topicLabel: item.topicLabel,
+        relatedProductIds: item.relatedProductIds,
+      })),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Ошибка загрузки новостей';
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get('/knowledge/stats', async (_req, res: Response) => {
+  try {
+    const [productCount, lastSync] = await Promise.all([
+      countProducts().catch(() => 0),
+      AgentRunModel.findOne({ type: 'sync', status: 'success' })
+        .sort({ finishedAt: -1 })
+        .lean(),
+    ]);
+
+    res.json({
+      productCount,
+      lastSyncAt: lastSync?.finishedAt?.toISOString?.() ?? null,
+      lastSyncStatus: lastSync?.status ?? null,
+      lastSyncStats: lastSync?.stats ?? null,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Ошибка статистики знаний';
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get('/settings/google-sheets', (_req, res: Response) => {
+  res.json(googleSheetsIntegration.getSettings());
+});
+
+router.post('/integrations/google-sheets/test', async (_req, res: Response) => {
+  try {
+    const result = await googleSheetsIntegration.testConnection();
+    res.status(result.ok ? 200 : 502).json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Ошибка проверки Google Sheets';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
+router.post('/integrations/google-sheets/init-catalog-sheet', async (_req, res: Response) => {
+  try {
+    if (!googleSheetsIntegration.getSettings().credentialsConfigured) {
+      res.status(400).json({
+        ok: false,
+        error: 'Google Sheets не настроен',
+        note: 'Заполните GOOGLE_SHEET_ID и credentials в .env',
+      });
+      return;
+    }
+    const result = await googleSheetsIntegration.initCatalogSheet();
+    res.status(result.ok ? 200 : 502).json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Ошибка создания листа';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
+router.post('/integrations/google-sheets/sync-catalog', async (_req, res: Response) => {
+  try {
+    if (!googleSheetsIntegration.getSettings().credentialsConfigured) {
+      res.status(400).json({
+        error: 'Google Sheets не настроен',
+        note: 'Заполните GOOGLE_SHEET_ID и credentials в .env',
+      });
+      return;
+    }
+    const stats = await googleSheetsIntegration.syncCatalog();
+    res.json({ status: 'success', stats });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Ошибка синхронизации каталога';
+    res.status(500).json({ status: 'failed', error: message });
+  }
+});
+
+router.get('/integrations/google-sheets/products-preview', async (req, res: Response) => {
+  try {
+    const limit = Math.min(parseInt(String(req.query.limit ?? '20'), 10) || 20, 100);
+    const preview = await googleSheetsIntegration.getProductsPreview(limit);
+    if (!preview.configured) {
+      res.status(400).json({
+        error: 'Google Sheets не настроен',
+        note: 'Заполните GOOGLE_SHEET_ID и credentials в .env',
+      });
+      return;
+    }
+    res.json(preview);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Ошибка чтения таблицы';
+    res.status(502).json({ error: message });
   }
 });
 

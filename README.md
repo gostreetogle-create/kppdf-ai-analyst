@@ -33,6 +33,21 @@ KPPDF 3.0 (:3000)  ──HTTP/X-API-Key──►  kppdf-ai-analyst (:3100)
 curl http://localhost:3100/v1/health
 ```
 
+### Production
+
+```bash
+npm run build:all
+NODE_ENV=production npm start
+# Admin UI: http://localhost:3100/admin/
+```
+
+Docker-образ (backend + admin static):
+
+```bash
+docker build -t kppdf-ai-analyst .
+docker run -p 3100:3100 --env-file .env kppdf-ai-analyst
+```
+
 Полная инструкция: [docs/ONBOARDING.md](docs/ONBOARDING.md)
 
 ## Документация
@@ -42,17 +57,16 @@ curl http://localhost:3100/v1/health
 | [docs/PROJECT_RULES.md](docs/PROJECT_RULES.md) | **Правила ведения проекта** — границы repo, порты, sync, start/stop |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Схема, границы сервисов, v1 vs roadmap |
 | [docs/ONBOARDING.md](docs/ONBOARDING.md) | Локальный запуск, секреты, smoke |
+| [docs/KPPDF3_REQUIREMENTS.md](docs/KPPDF3_REQUIREMENTS.md) | **Требования к kppdf-3.0** — чеклисты и промпты для передачи |
 | [docs/plans/ai-analyst-action-plan.md](docs/plans/ai-analyst-action-plan.md) | План реализации, API, фазы |
 | [AGENTS.md](AGENTS.md) | Инварианты кода для AI-агентов и разработчиков |
 
 ## Статус
 
 - [x] Intro kit (docs, AGENTS, scaffold)
-- [x] **Фаза 2 Admin** — React админка :5174, `/admin/*` JWT API, провайдеры и модели в MongoDB
-- [ ] `GET /v1/health` — mongo + qdrant ok
-- [ ] `POST /v1/sync` — products indexed
-- [ ] `POST /v1/news/refresh` — pipeline ok
-- [ ] KPPDF proxy + Angular `/news`
+- [x] **Фаза 2 Admin** — React админка, Jobs/KPPDF/News/Knowledge, ручной sync/refresh
+- [ ] Smoke: `POST /v1/sync` + `POST /v1/news/refresh` (нужен KPPDF + ai-sync)
+- [ ] KPPDF proxy + Angular `/news` (Фаза 3, другой repo)
 
 ## Порты
 

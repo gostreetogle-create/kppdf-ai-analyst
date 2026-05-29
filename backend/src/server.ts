@@ -3,10 +3,13 @@ import { connectMongo } from './clients/mongo.client';
 import { initKppdfSession } from './clients/kppdf.client';
 import { ensureCollection } from './clients/qdrant.client';
 import { createApp } from './app';
+import { recoverStaleAgentRuns } from './jobs/agent-run-recovery';
 import { startScheduler } from './jobs/scheduler';
 
 async function bootstrap() {
   await connectMongo(config.mongoUri);
+
+  await recoverStaleAgentRuns(15);
 
   try {
     await ensureCollection();
